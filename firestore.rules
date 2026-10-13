@@ -1,0 +1,98 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.uid in [
+        // 'YOUR_FIREBASE_UID'
+      ];
+    }
+
+    function validRequestCreate() {
+      return request.resource.data.keys().hasOnly([
+        'title',
+        'description',
+        'author_name',
+        'status',
+        'category',
+        'author_uid',
+        'author_device_id',
+        'vote_count',
+        'voters',
+        'created_at',
+        'admin_response',
+        'admin_response_uid',
+        'admin_response_updated_at'
+      ])
+      && request.resource.data.title is string
+      && request.resource.data.title.size() > 0
+      && request.resource.data.description is string
+      && request.resource.data.author_name is string
+      && request.resource.data.status == 'open'
+      && request.resource.data.category in ['feature', 'bug', 'improvement']
+      && request.resource.data.author_uid == request.auth.uid
+      && request.resource.data.vote_count == 1
+      && request.resource.data.voters is list
+      && request.resource.data.voters.size() == 1
+      && request.resource.data.voters[0] == request.auth.uid;
+    }
+
+    function validVoteUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['voters', 'vote_count'])
+        && request.resource.data.title == resource.data.title
+        && request.resource.data.description == resource.data.description
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.author_uid == resource.data.author_uid
+        && request.resource.data.admin_response == resource.data.admin_response
+        && request.resource.data.admin_response_uid == resource.data.admin_response_uid
+        && request.resource.data.admin_response_updated_at == resource.data.admin_response_updated_at;
+    }
+
+    function validAdminUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'status',
+        'admin_response',
+        'admin_response_uid',
+        'admin_response_updated_at',
+        'title',
+        'description'
+      ]);
+    }
+
+    match /feature_requests/{requestId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn() && validRequestCreate();
+
+      allow update: if isSignedIn() && (validVoteUpdate() || (isAdmin() && validAdminUpdate()));
+
+      allow delete: if isAdmin();
+
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+
+        allow create: if isSignedIn()
+          && request.resource.data.keys().hasOnly([
+            'text',
+            'author_name',
+            'author_uid',
+            'author_device_id',
+            'is_admin',
+            'created_at'
+          ])
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.author_name is string
+          && request.resource.data.author_uid == request.auth.uid
+          && request.resource.data.is_admin is bool;
+
+        allow update: if isAdmin();
+        allow delete: if isAdmin() || (isSignedIn() && resource.data.author_uid == request.auth.uid);
+      }
+    }
+  }
+}
